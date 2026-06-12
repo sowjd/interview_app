@@ -23,15 +23,17 @@ def handle_user_input(user_text: str) -> None:
     user_message = {"role": "user", "content": user_text}
     st.session_state.messages.append(user_message)
 
-    assistant_reply = "면접 답변을 확인했습니다. (임시 응답)"
-    assistant_message = {"role": "assistant", "content": assistant_reply}
-    st.session_state.messages.append(assistant_message)
+    # assistant_reply = "면접 답변을 확인했습니다. (임시 응답)"
+    # assistant_message = {"role": "assistant", "content": assistant_reply}
+    # st.session_state.messages.append(assistant_message)
 
 
-def generate_coach_reply(user_text: str, role_key: str) -> str:
+def generate_coach_reply(user_text: str, role_key: str) -> None:
     """선택한 면접관 유형에 맞는 임시 코치 응답을 만듭니다."""
     system_prompt = get_system_prompt(role_key)
-    return f"다음 관점으로 피드백합니다: {system_prompt:30}"
+    assistant_reply = f"(임시 응답) 다음 관점으로 피드백합니다: {system_prompt:30}"
+    assistant_message = {"role": "assistant", "content": assistant_reply}
+    st.session_state.messages.append(assistant_message)
 
 
 def main():
@@ -69,6 +71,7 @@ def main():
     user_input = st.chat_input("면접 답변을 입력해 주세요.")
     if user_input:
         handle_user_input(user_input)
+        generate_coach_reply(user_input, st.session_state.selected_role)
         st.rerun()
 
     for message in st.session_state.messages:
