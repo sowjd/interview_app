@@ -43,7 +43,9 @@ class InterviewStreamRequest(BaseModel):
     session_id: str | None = Field(
         default=None, description="UUID 기반 면접 세션 ID입니다."
     )
-    model: str = Field(default="gpt-4o-mini", description="사용할 OpenAI 모델명입니다.")
+    model: str = Field(
+        default="gpt-5.4-nano", description="사용할 OpenAI 모델명입니다."
+    )
 
 
 # 응답 모델
@@ -91,25 +93,28 @@ def get_interview_openai_client() -> AsyncOpenAI:
 async def interview_event_generator(
     request: InterviewStreamRequest,
 ) -> AsyncIterator[str]:
-    """면접 코치 피드백을 SSE data 이벤트로 스트리밍합니다.
-    작성 흐름:
-    1. get_interview_openai_client() 를 호출해 client 를 얻는다.
-    2. ROLE_PROMPTS 에서 request.role 에 맞는 system_prompt 를 꺼낸다.(없으면 "technical" 사용)
-    3. client.chat.completions.create(..., stream=True) 로 스트림을 연다. messages 는 [system_prompt, user 메시지(질문+답변)] 두 개다.
-    4. async for chunk in stream: 으로 순회하며 delta.content 가 있을 때만 f"data: {delta.content}\n\n" 를 yield 한다.
-    5. 순회 완료 후 "data: [DONE]\n\n" 을 yield 한다.
-    """
+    """면접 코치 피드백을 SSE data 이벤트로 스트리밍합니다."""
     client = get_interview_openai_client()
 
     system_prompt = get_system_prompt(request.role, "technical")
 
-    # 세션 이력 연결
     history = []
-    if request.session_id:
-        try:
-            history = get_history(request.session_id)
-        except KeyError:
-            raise HTTPException(status_code=404, detail="session not found")
+    if not request.session_id:
+        session = await create_interview_session(
+            SessionCreateRequest(role=request.role)
+        )
+        request.session_id = session.session_id
+        yield (
+            "data: "
+            f"{json.dumps({'type': 'session', 'session_id': request.session_id}, ensure_ascii=False)}"
+            "\n\n"
+        )
+
+    # 세션 이력 연결
+    try:
+        history = get_history(request.session_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="session not found")
 
     user_content = (
         f"[면접 질문]\n{request.question}\n\n"
@@ -132,7 +137,11 @@ async def interview_event_generator(
             token = chunk.choices[0].delta.content
 
             if token:
-                yield f"data: {json.dumps(token, ensure_ascii=False)}\n\n"
+                yield (
+                    "data: "
+                    f"{json.dumps({'type': 'token', 'content': token}, ensure_ascii=False)}"
+                    "\n\n"
+                )
 
         yield "data: [DONE]\n\n"
     except RateLimitError:

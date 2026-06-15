@@ -3,6 +3,8 @@ from pathlib import Path
 
 import streamlit as st
 
+from frontend.api_client import stream_interview_message
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -12,9 +14,15 @@ from core.roles import get_interviewer_options, get_system_prompt
 
 def initialize_messages() -> None:
     """면접 대화 기록이 없으면 초기 안내 메시지를 준비합니다."""
+    if "session_id" not in st.session_state:
+        st.session_state.session_id = None
+
     if "messages" not in st.session_state:
         st.session_state.messages = [
-            {"role": "assistant", "content": "안녕하세요. 저는 AI 면접 코치입니다."}
+            {
+                "role": "assistant",
+                "content": "안녕하세요. 저는 AI 면접 코치입니다. 무엇을 도와드릴까요?",
+            }
         ]
 
 
@@ -23,15 +31,27 @@ def handle_user_input(user_text: str) -> None:
     user_message = {"role": "user", "content": user_text}
     st.session_state.messages.append(user_message)
 
-    # assistant_reply = "면접 답변을 확인했습니다. (임시 응답)"
-    # assistant_message = {"role": "assistant", "content": assistant_reply}
-    # st.session_state.messages.append(assistant_message)
-
 
 def generate_coach_reply(user_text: str, role_key: str) -> None:
-    """선택한 면접관 유형에 맞는 임시 코치 응답을 만듭니다."""
+    """선택한 면접관 유형에 맞는 응답을 만듭니다."""
     system_prompt = get_system_prompt(role_key)
-    assistant_reply = f"(임시 응답) 다음 관점으로 피드백합니다: {system_prompt:30}"
+    assistant_reply = ""
+    placeholder = st.empty()
+    for event in stream_interview_message(
+        user_text,
+        role_key,
+        st.session_state.session_id,
+    ):
+        if event.get("type") == "session":
+            st.session_state.session_id = event["session_id"]
+            continue
+
+        if event.get("type") != "token":
+            continue
+
+        assistant_reply += event["content"]
+        placeholder.markdown(assistant_reply)
+
     assistant_message = {"role": "assistant", "content": assistant_reply}
     st.session_state.messages.append(assistant_message)
 
@@ -67,16 +87,18 @@ def main():
 
     initialize_messages()
 
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+
     # 채팅 입력 위젯 — 화면 하단에 고정됩니다.
     user_input = st.chat_input("면접 답변을 입력해 주세요.")
     if user_input:
         handle_user_input(user_input)
-        generate_coach_reply(user_input, st.session_state.selected_role)
-        st.rerun()
-
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+        with st.chat_message("user"):
+            st.markdown(user_input)
+        with st.chat_message("assistant"):
+            generate_coach_reply(user_input, st.session_state.selected_role)
 
 
 if __name__ == "__main__":
