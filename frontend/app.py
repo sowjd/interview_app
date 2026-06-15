@@ -49,7 +49,7 @@ def main():
         st.header("면접관 설정")
 
         if "selected_role" not in st.session_state:
-            st.session_state.selected_role = "tech"
+            st.session_state.selected_role = "technical"
 
         interviewer_options = get_interviewer_options()
         interviewer_keys = list(interviewer_options.keys())

@@ -11,8 +11,8 @@ class InterviewerRole:
 
 
 ROLES: dict[str, InterviewerRole] = {
-    "tech": InterviewerRole(
-        key="tech",
+    "technical": InterviewerRole(
+        key="technical",
         name="기술 면접관",
         system_prompt=(
             "당신은 신입 개발자 기술 면접관입니다. "
@@ -63,5 +63,7 @@ def get_interviewer_options() -> dict[str, str]:
     return {key: role.name for key, role in ROLES.items()}
 
 
-def get_system_prompt(role_key: str) -> str:
+def get_system_prompt(role_key: str, default_key: str = "technical") -> str:
+    if role_key not in ROLES:
+        return ROLES[default_key].system_prompt
     return ROLES[role_key].system_prompt
