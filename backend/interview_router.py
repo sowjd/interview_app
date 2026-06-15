@@ -8,6 +8,12 @@ from fastapi.responses import StreamingResponse
 from openai import APIError, AsyncOpenAI, BaseModel, RateLimitError
 from pydantic import Field
 
+from backend.sessions import (
+    create_session,
+    get_history,
+    get_session_role,
+    set_session_role,
+)
 from core.roles import get_system_prompt
 
 load_dotenv()
@@ -40,6 +46,40 @@ class InterviewStreamRequest(BaseModel):
     model: str = Field(default="gpt-4o-mini", description="사용할 OpenAI 모델명입니다.")
 
 
+# 응답 모델
+class SessionCreateResponse(BaseModel):
+    session_id: str
+    role: str
+
+
+# 세션 생성 요청 모델
+class SessionCreateRequest(BaseModel):
+    role: str = Field(default="technical", description="초기 면접관 유형")
+
+
+class HistoryResponse(BaseModel):
+    session_id: str
+    messages: list[dict[str, str]]
+    role: str
+    message_count: int
+
+
+ALLOWED_ROLES = {"technical", "personality", "executive", "structured"}
+
+
+class RoleUpdateRequest(BaseModel):
+    role: str = Field(
+        ...,
+        description="변경할 면접관 유형 (technical · personality · executive · structured)",
+    )
+
+
+class RoleUpdateResponse(BaseModel):
+    session_id: str
+    role: str
+    message: str
+
+
 def get_interview_openai_client() -> AsyncOpenAI:
     """환경변수에서 OPENAI_API_KEY를 읽어 AsyncOpenAI 클라이언트를 만듭니다."""
     api_key = os.getenv("OPENAI_API_KEY")
@@ -63,6 +103,14 @@ async def interview_event_generator(
 
     system_prompt = get_system_prompt(request.role, "technical")
 
+    # 세션 이력 연결
+    history = []
+    if request.session_id:
+        try:
+            history = get_history(request.session_id)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="session not found")
+
     user_content = (
         f"[면접 질문]\n{request.question}\n\n"
         f"[지원자 답변]\n{request.answer}\n\n"
@@ -75,6 +123,7 @@ async def interview_event_generator(
             stream=True,
             messages=[
                 {"role": "system", "content": system_prompt},
+                *history,
                 {"role": "user", "content": user_content},
             ],
         )
@@ -100,3 +149,45 @@ async def interview_stream(request: InterviewStreamRequest) -> StreamingResponse
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@router.post("/session/create", response_model=SessionCreateResponse)
+async def create_interview_session(body: SessionCreateRequest) -> SessionCreateResponse:
+    session_id = create_session(body.role)
+    return SessionCreateResponse(session_id=session_id, role=body.role)
+
+
+@router.get("/session/{session_id}/history", response_model=HistoryResponse)
+async def get_interview_history(session_id: str) -> HistoryResponse:
+    """
+    세션 ID 로 면접 이력을 조회합니다.
+    """
+    try:
+        messages = get_history(session_id)
+        role = get_session_role(session_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="session not found")
+
+    return HistoryResponse(
+        session_id=session_id,
+        messages=messages,
+        role=role,
+        message_count=len(messages),
+    )
+
+
+@router.patch("/session/{session_id}/role", response_model=RoleUpdateResponse)
+async def update_interview_role(session_id: str, body: RoleUpdateRequest):
+    """면접관 유형 변경"""
+    if body.role not in ALLOWED_ROLES:
+        raise HTTPException(status_code=400, detail="role not found")
+    else:
+        try:
+            set_session_role(session_id, body.role)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="session not found")
+        return RoleUpdateResponse(
+            session_id=session_id,
+            role=body.role,
+            message=f"면접관 유형이 {body.role}로 변경되었습니다.",
+        )
